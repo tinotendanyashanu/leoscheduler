@@ -1,0 +1,34 @@
+name = "leoscheduler-worker"
+main = "src/index.ts"
+compatibility_date = "2025-10-09"
+
+# Bind the KV store for posts and tokens
+[[kv_namespaces]]
+binding = "KV_POSTS"
+id = "KV_POSTS_ID"       # Replace with actual ID after: wrangler kv namespace create KV_POSTS
+# preview_id = "KV_POSTS_PREVIEW_ID"
+
+[[kv_namespaces]]
+binding = "KV_TOKENS"
+id = "KV_TOKENS_ID"      # Replace with actual ID after: wrangler kv namespace create KV_TOKENS
+# preview_id = "KV_TOKENS_PREVIEW_ID"
+
+[vars]
+# Your public OAuth2 client info from X (replace with actual values)
+X_CLIENT_ID = "your_x_client_id"
+X_REDIRECT_URI = "https://your-worker.your-subdomain.workers.dev/auth/callback"
+# Allowed frontend origin (CORS) - update with your deployed frontend URL
+APP_ORIGIN = "http://localhost:3000"
+
+# Cron triggers - runs at 07:00 and 16:00 UTC (≈ 09:00 & 18:00 Warsaw depending on DST)
+[triggers]
+crons = ["0 7,16 * * *"]
+
+[placement]
+mode = "smart"
+
+# Set these secrets with: wrangler secret put SECRET_NAME
+# Required secrets:
+# - X_CLIENT_SECRET (from X Developer Portal)
+# - JWT_SIGNING_KEY (any long random string for signing session tokens)
+# - X_API_BASE (optional override; defaults to https://api.x.com)

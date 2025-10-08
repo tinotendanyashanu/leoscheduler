@@ -1,0 +1,26 @@
+{
+  "name": "leoscheduler-worker",
+  "version": "1.0.0",
+  "description": "Cloudflare Worker backend for LeoScheduler",
+  "main": "src/index.ts",
+  "type": "module",
+  "scripts": {
+    "dev": "wrangler dev",
+    "deploy": "wrangler publish",
+    "setup": "node deploy.js",
+    "test": "echo \"Error: no test specified\" && exit 1"
+  },
+  "keywords": ["cloudflare", "worker", "twitter", "scheduler"],
+  "author": "",
+  "license": "ISC",
+  "dependencies": {
+    "hono": "^3.12.11",
+    "jose": "^5.2.2",
+    "undici": "^6.6.2"
+  },
+  "devDependencies": {
+    "wrangler": "^3.28.2",
+    "typescript": "^5.3.3",
+    "@cloudflare/workers-types": "^4.20240208.0"
+  }
+}

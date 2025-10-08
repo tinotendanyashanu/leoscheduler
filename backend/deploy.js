@@ -1,0 +1,47 @@
+#!/usr/bin/env node
+
+console.log('🚀 Leo Scheduler Backend Deployment Guide\n');
+
+console.log('📋 Pre-deployment Checklist:');
+console.log('');
+console.log('1. ✅ Create Cloudflare KV Namespaces:');
+console.log('   - Run: wrangler kv:namespace create "POSTS_KV"');
+console.log('   - Run: wrangler kv:namespace create "USERS_KV"');
+console.log('   - Update namespace IDs in wrangler.toml');
+console.log('');
+console.log('2. ✅ Set Environment Variables:');
+console.log('   - wrangler secret put X_CLIENT_ID');
+console.log('   - wrangler secret put X_CLIENT_SECRET');
+console.log('   - wrangler secret put JWT_SECRET');
+console.log('   - wrangler secret put BASE_URL');
+console.log('');
+console.log('3. ✅ Configure Twitter/X App:');
+console.log('   - Enable OAuth2 with PKCE');
+console.log('   - Add callback URL: https://your-worker.workers.dev/auth/callback');
+console.log('   - Request scopes: tweet.read, tweet.write, users.read, offline.access');
+console.log('');
+console.log('🔧 Deployment Commands:');
+console.log('');
+console.log('# Deploy to production');
+console.log('npm run deploy');
+console.log('');
+console.log('# Start local development');
+console.log('npm run dev');
+console.log('');
+console.log('🧪 Testing:');
+console.log('');
+console.log('# Health check');
+console.log('curl https://your-worker.workers.dev/health');
+console.log('');
+console.log('# OAuth flow');
+console.log('GET https://your-worker.workers.dev/auth/connect');
+console.log('');
+console.log('📊 Monitoring:');
+console.log('');
+console.log('# View worker logs');
+console.log('wrangler tail');
+console.log('');
+console.log('# Check KV data');
+console.log('wrangler kv:key list --binding=USERS_KV');
+console.log('');
+console.log('🎉 Ready to deploy! Run: npm run deploy');
