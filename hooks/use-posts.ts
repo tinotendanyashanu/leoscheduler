@@ -76,6 +76,7 @@ function seed(): Post[] {
 type Store = {
   posts: Post[];
   selectedId: string | null;
+  isLoading: boolean;
   setSelected: (id: string | null) => void;
 
   moveTo: (id: string, to: PostStatus) => void;
@@ -91,8 +92,9 @@ type Store = {
 };
 
 export const usePosts = create<Store>((set, get) => ({
-  posts: seed(),
+  posts: [],
   selectedId: null,
+  isLoading: false,
   setSelected: (id) => set({ selectedId: id }),
 
   moveTo: (id, to) => {
@@ -157,11 +159,14 @@ export const usePosts = create<Store>((set, get) => ({
   // API methods
   loadFromApi: async () => {
     try {
+      set({ isLoading: true });
       const apiPosts = await api.listPosts();
       const posts = apiPosts.map(apiToPost);
       set({ posts });
     } catch (error) {
       console.error('Failed to load posts from API:', error);
+    } finally {
+      set({ isLoading: false });
     }
   },
 

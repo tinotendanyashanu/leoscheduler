@@ -2,6 +2,7 @@
 
 import { KanbanColumn } from "./kanban-column";
 import { usePosts } from "@/hooks/use-posts";
+import { Skeleton } from "@/components/ui/skeleton";
 import type { PostStatus } from "@/types/post";
 import {
   DndContext,
@@ -19,7 +20,7 @@ const COLUMNS: { key: PostStatus; title: string; color: string }[] = [
 ];
 
 export function PlannerBoard() {
-  const { posts, moveTo, reorder } = usePosts();
+  const { posts, isLoading, moveTo, reorder } = usePosts();
 
   function onDragEnd(e: DragEndEvent) {
     const { active, over } = e;
@@ -64,9 +65,17 @@ export function PlannerBoard() {
   return (
     <DndContext collisionDetection={closestCorners} onDragEnd={onDragEnd}>
       <div className="grid grid-cols-4 gap-4 h-[calc(100vh-8rem)]">
-        {COLUMNS.map((c) => (
-          <KanbanColumn key={c.key} status={c.key} title={c.title} accent={c.color} />
-        ))}
+        {isLoading
+          ? COLUMNS.map((c) => (
+              <div key={c.key} className="space-y-3">
+                <Skeleton className="h-8 w-full" />
+                <Skeleton className="h-24 w-full" />
+                <Skeleton className="h-24 w-full" />
+              </div>
+            ))
+          : COLUMNS.map((c) => (
+              <KanbanColumn key={c.key} status={c.key} title={c.title} accent={c.color} />
+            ))}
       </div>
     </DndContext>
   );

@@ -27,7 +27,30 @@ async function api<T>(path: string, init: RequestInit = {}): Promise<T> {
   };
   if (s?.token) headers.Authorization = `Bearer ${s.token}`;
   const res = await fetch(`${BASE}${path}`, { ...init, headers, credentials: "omit" });
-  if (!res.ok) throw new Error(`${res.status} ${await res.text()}`);
+
+  if (!res.ok) {
+    const status = res.status;
+    let message = '';
+    try {
+      const text = await res.text();
+      message = text || res.statusText;
+    } catch {
+      message = res.statusText;
+    }
+
+    if (typeof window !== 'undefined') {
+      // Emit a global event for UI toast handling
+      window.dispatchEvent(new CustomEvent('api-error', { detail: { status, message, path } }));
+      if (status === 401) {
+        // Session likely invalid/expired
+        try { clearSession(); } catch {}
+        window.dispatchEvent(new CustomEvent('auth-invalid'));
+      }
+    }
+
+    throw new Error(`${status} ${message}`);
+  }
+
   return res.json() as Promise<T>;
 }
 

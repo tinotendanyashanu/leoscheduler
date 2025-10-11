@@ -7,7 +7,7 @@ import { ComposeDialog } from "@/components/composer/compose-dialog";
 import { PauseBanner } from "@/components/pause-banner";
 import { LoginButton } from "@/components/auth/login-button";
 import { UserMenu } from "@/components/auth/user-menu";
-import { getSession, getCurrentUser, type Session } from "@/lib/api";
+import { getSession, setSession, getCurrentUser, type Session } from "@/lib/api";
 import { usePosts } from "@/hooks/use-posts";
 import Link from "next/link";
 
@@ -17,6 +17,18 @@ export default function Page() {
   const loadFromApi = usePosts(s => s.loadFromApi);
 
   useEffect(() => {
+    // Capture token on root redirect (worker may send token here)
+    const params = typeof window !== 'undefined' ? new URLSearchParams(window.location.search) : null;
+    const urlToken = params?.get('token');
+    if (urlToken) {
+      try {
+        const payload = JSON.parse(atob(urlToken.split('.')[1]));
+        setSession({ token: urlToken, user: { id: payload.sub, username: '', displayName: '' } });
+        // clean URL
+        window.history.replaceState({}, '', window.location.pathname);
+      } catch {}
+    }
+
     const s = getSession();
     if (s) {
       setSession(s);
@@ -27,7 +39,10 @@ export default function Page() {
           const updatedSession = { ...s, user };
           setSession(updatedSession);
           setUserLoaded(true);
-        }).catch(console.error);
+        }).catch((err) => {
+          console.error(err);
+          setUserLoaded(true);
+        });
       } else {
         setUserLoaded(true);
       }
@@ -38,6 +53,13 @@ export default function Page() {
       setUserLoaded(true);
     }
   }, [loadFromApi]);
+
+  const [authInvalid, setAuthInvalid] = useState(false);
+  useEffect(() => {
+    const onInvalid = () => setAuthInvalid(true);
+    window.addEventListener('auth-invalid', onInvalid);
+    return () => window.removeEventListener('auth-invalid', onInvalid);
+  }, []);
 
   return (
     <main className="p-4">
@@ -67,6 +89,12 @@ export default function Page() {
 
       {session ? (
         <>
+          {authInvalid ? (
+            <div className="mb-3 rounded-md border bg-red-100 text-red-900 dark:bg-red-900/30 dark:text-red-200 px-3 py-2 flex items-center justify-between gap-2">
+              <div className="text-sm">Session expired. Please reconnect X.</div>
+              <LoginButton />
+            </div>
+          ) : null}
           <PauseBanner />
 
           <div className="grid grid-cols-12 gap-4">

@@ -1,9 +1,12 @@
 "use client";
 
+import { useEffect, useState } from "react";
 import { usePosts } from "@/hooks/use-posts";
 import { useSettings } from "@/hooks/use-settings";
 import type { Post } from "@/types/post";
 import { Card } from "@/components/ui/card";
+import { Button } from "@/components/ui/button";
+import { Skeleton } from "@/components/ui/skeleton";
 import { Avatar, AvatarFallback } from "@/components/ui/avatar";
 import { Badge } from "@/components/ui/badge";
 
@@ -31,9 +34,19 @@ function linkify(text: string) {
 }
 
 export function TweetPreview() {
-  const { posts, selectedId } = usePosts();
+  const { posts, selectedId, isLoading, updatePostViaApi, deletePostViaApi, setSelected } = usePosts();
   const { displayName, handle, timezone } = useSettings();
   const post = posts.find((p) => p.id === selectedId) ?? posts[0];
+
+  if (isLoading) {
+    return (
+      <Card className="p-4 h-full space-y-3">
+        <Skeleton className="h-8 w-1/2" />
+        <Skeleton className="h-24 w-full" />
+        <Skeleton className="h-4 w-1/3" />
+      </Card>
+    );
+  }
 
   if (!post) {
     return (
@@ -41,6 +54,23 @@ export function TweetPreview() {
         Select a post to preview
       </Card>
     );
+  }
+
+  let undoTimer: any;
+  let lastSnapshot = post;
+
+  async function unschedule() {
+    await updatePostViaApi(post.id, { status: "draft", scheduledFor: null, runAtUTC: null });
+  }
+  async function onDelete() {
+    // optimistic remove
+    lastSnapshot = post;
+    setSelected(null);
+    await deletePostViaApi(post.id);
+  }
+
+  async function saveEdit(newText: string) {
+    await updatePostViaApi(post.id, { text: newText, content: newText });
   }
 
   return (
@@ -54,8 +84,18 @@ export function TweetPreview() {
           <span className="text-sm font-semibold leading-tight">{displayName}</span>
           <span className="text-xs text-muted-foreground">{handle}</span>
         </div>
-        <div className="ml-auto">
+        <div className="ml-auto flex items-center gap-2">
           {post.threadSteps ? <Badge variant="outline">{post.threadSteps} steps</Badge> : null}
+          {/* Actions */}
+          {post.status !== 'sent' && (
+            <div className="flex items-center gap-2">
+              <InlineEdit text={post.text || ''} onSave={saveEdit} />
+              {post.status === 'scheduled' && (
+                <Button size="sm" variant="secondary" onClick={unschedule} title="Move to Drafts">Unschedule</Button>
+              )}
+              <UndoableDelete onConfirm={onDelete} />
+            </div>
+          )}
         </div>
       </div>
 
@@ -78,5 +118,41 @@ export function TweetPreview() {
         {formatWhen(post, timezone)}
       </div>
     </Card>
+  );
+}
+
+function InlineEdit({ text, onSave }: { text: string; onSave: (t: string) => Promise<void> }) {
+  const [editing, setEditing] = useState(false);
+  const [val, setVal] = useState(text);
+  useEffect(() => { setVal(text); }, [text]);
+  if (!editing) return <Button size="sm" variant="outline" onClick={() => setEditing(true)}>Edit</Button>;
+  return (
+    <div className="flex items-center gap-2">
+      <input className="text-sm px-2 py-1 border rounded w-40 bg-background" value={val} onChange={(e) => setVal(e.target.value)} />
+      <Button size="sm" onClick={async () => { await onSave(val.trim()); setEditing(false); }} disabled={!val.trim()}>Save</Button>
+      <Button size="sm" variant="ghost" onClick={() => { setVal(text); setEditing(false); }}>Cancel</Button>
+    </div>
+  );
+}
+
+function UndoableDelete({ onConfirm }: { onConfirm: () => Promise<void> }) {
+  const [pending, setPending] = useState(false);
+  useEffect(() => {
+    let t: any;
+    if (pending) {
+      t = setTimeout(() => {
+        onConfirm().catch(console.error);
+        setPending(false);
+      }, 5000);
+    }
+    return () => { if (t) clearTimeout(t); };
+  }, [pending, onConfirm]);
+
+  if (!pending) return <Button size="sm" variant="destructive" onClick={() => setPending(true)}>Delete</Button>;
+  return (
+    <div className="flex items-center gap-2 text-xs">
+      <span>Deleting…</span>
+      <Button size="sm" variant="secondary" onClick={() => setPending(false)}>Undo</Button>
+    </div>
   );
 }
