@@ -29,10 +29,10 @@ export function GlobalToaster() {
       add("Session expired. Please reconnect X.", "error");
     };
 
-    window.addEventListener("api-error", onApiError as any);
+    window.addEventListener("api-error", onApiError as EventListener);
     window.addEventListener("auth-invalid", onAuthInvalid);
     return () => {
-      window.removeEventListener("api-error", onApiError as any);
+      window.removeEventListener("api-error", onApiError as EventListener);
       window.removeEventListener("auth-invalid", onAuthInvalid);
     };
   }, []);

@@ -56,7 +56,7 @@ export function TweetPreview() {
     );
   }
 
-  let undoTimer: any;
+  let undoTimer: NodeJS.Timeout | undefined;
   let lastSnapshot = post;
 
   async function unschedule() {
@@ -138,7 +138,7 @@ function InlineEdit({ text, onSave }: { text: string; onSave: (t: string) => Pro
 function UndoableDelete({ onConfirm }: { onConfirm: () => Promise<void> }) {
   const [pending, setPending] = useState(false);
   useEffect(() => {
-    let t: any;
+    let t: NodeJS.Timeout;
     if (pending) {
       t = setTimeout(() => {
         onConfirm().catch(console.error);

@@ -5,16 +5,14 @@ compatibility_date = "2025-10-09"
 # Bind the KV store for posts and tokens
 [[kv_namespaces]]
 binding = "KV_POSTS"
-id = "KV_POSTS_ID"       # Replace with actual ID after: wrangler kv namespace create KV_POSTS
-# preview_id = "KV_POSTS_PREVIEW_ID"
+id = "24b4c5ec701b4ce88eed6a30951d770b"
 
 [[kv_namespaces]]
 binding = "KV_TOKENS"
-id = "KV_TOKENS_ID"      # Replace with actual ID after: wrangler kv namespace create KV_TOKENS
-# preview_id = "KV_TOKENS_PREVIEW_ID"
+id = "5fd58aae352d44c88f9a78d2b9e6a7ab"
 
 [vars]
-# Your public OAuth2 client info from X (replace with actual values)
+# Your public OAuth2 client info from X (replace with your actual values)
 X_CLIENT_ID = "your_x_client_id"
 X_REDIRECT_URI = "https://your-worker.your-subdomain.workers.dev/auth/callback"
 # Allowed frontend origin (CORS) - update with your deployed frontend URL
