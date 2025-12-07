@@ -38,7 +38,7 @@ async function sha256Base64Url(plain: string) {
 }
 
 export const oauth = {
-  async createAuthUrl(clientId: string, baseUrl: string): Promise<{ authUrl: string; state: string; codeVerifier: string }> {
+  async createAuthUrl(clientId: string, redirectUri: string): Promise<{ authUrl: string; state: string; codeVerifier: string }> {
     const state = base64urlRandom();
     const codeVerifier = base64urlRandom();
     const codeChallenge = await sha256Base64Url(codeVerifier);
@@ -46,8 +46,8 @@ export const oauth = {
     const authParams = new URLSearchParams({
       response_type: "code",
       client_id: clientId,
-      redirect_uri: `${baseUrl}/auth/callback`,
-      scope: "tweet.read tweet.write users.read offline.access",
+      redirect_uri: redirectUri,
+      scope: "tweet.write offline.access",
       state: state,
       code_challenge: codeChallenge,
       code_challenge_method: "S256",
@@ -60,11 +60,11 @@ export const oauth = {
     };
   },
 
-  async exchangeCodeForTokens(code: string, codeVerifier: string, clientId: string, clientSecret: string, baseUrl: string) {
+  async exchangeCodeForTokens(code: string, codeVerifier: string, clientId: string, clientSecret: string, redirectUri: string) {
     const tokenParams = new URLSearchParams({
       grant_type: "authorization_code",
       code: code,
-      redirect_uri: `${baseUrl}/auth/callback`,
+      redirect_uri: redirectUri,
       client_id: clientId,
       code_verifier: codeVerifier,
     });
@@ -118,9 +118,11 @@ export const oauth = {
 
   async verifyJWT(jwt: string, secret: string) {
     try {
+      // console.log("Verifying JWT:", jwt.slice(0, 10) + "...", "Secret length:", secret?.length);
       const { payload } = await jwtVerify(jwt, new TextEncoder().encode(secret));
       return payload;
-    } catch {
+    } catch (e) {
+      console.error("JWT Verification failed:", e);
       return null;
     }
   }

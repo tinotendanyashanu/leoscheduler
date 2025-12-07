@@ -1,8 +1,8 @@
-const X_API = "https://api.x.com";
+const X_API = "https://api.twitter.com";
 
 export const xApi = {
   async getUserInfo(accessToken: string) {
-    const res = await fetch(`${X_API}/2/users/me?user.fields=profile_image_url`, {
+    const res = await fetch(`${X_API}/2/users/me`, {
       headers: { Authorization: `Bearer ${accessToken}` },
     });
     

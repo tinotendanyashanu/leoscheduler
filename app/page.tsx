@@ -10,9 +10,10 @@ import { UserMenu } from "@/components/auth/user-menu";
 import { getSession, setSession, getCurrentUser, type Session } from "@/lib/api";
 import { usePosts } from "@/hooks/use-posts";
 import Link from "next/link";
+import { Calendar, Layout, PenTool, ShieldCheck } from "lucide-react";
 
 export default function Page() {
-  const [session, setSession] = useState<Session | null>(null);
+  const [currentSession, setCurrentSession] = useState<Session | null>(null);
   const [userLoaded, setUserLoaded] = useState(false);
   const loadFromApi = usePosts(s => s.loadFromApi);
 
@@ -23,7 +24,13 @@ export default function Page() {
     if (urlToken) {
       try {
         const payload = JSON.parse(atob(urlToken.split('.')[1]));
-        setSession({ token: urlToken, user: { id: payload.sub, username: '', displayName: '' } });
+        const newSession = { token: urlToken, user: { id: payload.sub, username: '', displayName: '' } };
+        
+        // Persist to localStorage
+        setSession(newSession);
+        // Update UI state
+        setCurrentSession(newSession);
+        
         // clean URL
         window.history.replaceState({}, '', window.location.pathname);
       } catch {}
@@ -31,13 +38,14 @@ export default function Page() {
 
     const s = getSession();
     if (s) {
-      setSession(s);
+      setCurrentSession(s);
       
       // Load user info if we don't have it
       if (!s.user.username) {
         getCurrentUser().then(user => {
           const updatedSession = { ...s, user };
-          setSession(updatedSession);
+          setSession(updatedSession); // Persist updated user info
+          setCurrentSession(updatedSession);
           setUserLoaded(true);
         }).catch((err) => {
           console.error(err);
@@ -61,61 +69,97 @@ export default function Page() {
     return () => window.removeEventListener('auth-invalid', onInvalid);
   }, []);
 
+  if (!currentSession) {
+    return (
+      <main className="min-h-screen flex flex-col">
+        <header className="p-6 flex items-center justify-between border-b bg-background/50 backdrop-blur-sm sticky top-0 z-50">
+          <div className="font-bold text-xl tracking-tight">LeoScheduler</div>
+          <div className="flex items-center gap-4">
+            <ModeToggle />
+            <LoginButton />
+          </div>
+        </header>
+
+        <section className="flex-1 flex flex-col items-center justify-center p-8 text-center space-y-8 max-w-4xl mx-auto">
+          <div className="space-y-4">
+            <h1 className="text-4xl md:text-6xl font-extrabold tracking-tighter bg-gradient-to-r from-blue-600 to-indigo-600 bg-clip-text text-transparent pb-2">
+              Schedule Tweets Like a Pro
+            </h1>
+            <p className="text-xl text-muted-foreground max-w-2xl mx-auto">
+              The modern, privacy-focused tweet scheduler. Drag, drop, and automate your X presence without the monthly fees.
+            </p>
+          </div>
+
+          <div className="flex gap-4 justify-center">
+            <LoginButton />
+          </div>
+
+          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6 pt-12 text-left">
+            <Feature icon={Layout} title="Kanban Board" desc="Visualize your content pipeline with an intuitive drag-and-drop board." />
+            <Feature icon={Calendar} title="Smart Scheduling" desc="Queue up threads and tweets to go out at the perfect time." />
+            <Feature icon={PenTool} title="Thread Composer" desc="Write long-form threads with a powerful, distraction-free editor." />
+            <Feature icon={ShieldCheck} title="Secure & Private" desc="Your tokens are stored securely in Cloudflare KV. You own your data." />
+          </div>
+        </section>
+      </main>
+    );
+  }
+
   return (
-    <main className="p-4">
-      <header className="mb-4 flex items-center justify-between border-b pb-3">
-        <div className="font-semibold">LeoScheduler</div>
+    <main className="h-screen flex flex-col overflow-hidden bg-background">
+      <header className="flex-none h-14 px-4 flex items-center justify-between border-b bg-background/95 backdrop-blur supports-[backdrop-filter]:bg-background/60">
+        <div className="font-semibold tracking-tight flex items-center gap-2">
+          LeoScheduler
+        </div>
         <div className="flex items-center gap-2">
-          {session ? (
-            <>
-              <Link href="/calendar" className="text-sm underline underline-offset-4 text-muted-foreground hover:text-foreground">
-                Calendar
-              </Link>
-              <Link href="/settings" className="text-sm underline underline-offset-4 text-muted-foreground hover:text-foreground">
-                Settings
-              </Link>
-              <ComposeDialog />
-              <UserMenu />
-              <ModeToggle />
-            </>
-          ) : (
-            <>
-              <LoginButton />
-              <ModeToggle />
-            </>
-          )}
+          <Link href="/calendar" className="text-sm font-medium text-muted-foreground hover:text-foreground transition-colors px-2">
+            Calendar
+          </Link>
+          <Link href="/settings" className="text-sm font-medium text-muted-foreground hover:text-foreground transition-colors px-2">
+            Settings
+          </Link>
+          <div className="h-4 w-[1px] bg-border mx-2" />
+          <ComposeDialog />
+          <UserMenu />
+          <ModeToggle />
         </div>
       </header>
 
-      {session ? (
-        <>
-          {authInvalid ? (
-            <div className="mb-3 rounded-md border bg-red-100 text-red-900 dark:bg-red-900/30 dark:text-red-200 px-3 py-2 flex items-center justify-between gap-2">
-              <div className="text-sm">Session expired. Please reconnect X.</div>
-              <LoginButton />
-            </div>
-          ) : null}
-          <PauseBanner />
-
-          <div className="grid grid-cols-12 gap-4">
-            {/* Left: Board */}
-            <section className="col-span-12 lg:col-span-8 xl:col-span-9">
-              <PlannerBoard />
-            </section>
-
-            {/* Right: Live Preview */}
-            <aside className="col-span-12 lg:col-span-4 xl:col-span-3 h-[calc(100vh-8rem)] sticky top-20">
-              <TweetPreview />
-            </aside>
+      <div className="flex-1 overflow-hidden">
+        {authInvalid && (
+          <div className="bg-destructive/10 text-destructive px-4 py-2 text-sm flex items-center justify-between border-b border-destructive/20">
+            <span>Session expired. Please reconnect your X account.</span>
+            <LoginButton />
           </div>
-        </>
-      ) : (
-        <div className="text-center py-12">
-          <h2 className="text-lg font-medium mb-2">Welcome to LeoScheduler</h2>
-          <p className="text-sm text-muted-foreground mb-6">Connect your X account to start planning and scheduling your tweets.</p>
-          {!userLoaded && <p className="text-xs text-muted-foreground">Loading...</p>}
+        )}
+        <PauseBanner />
+
+        <div className="grid grid-cols-12 h-full">
+          {/* Left: Board */}
+          <section className="col-span-12 lg:col-span-8 xl:col-span-9 h-full overflow-hidden border-r bg-muted/5">
+            <div className="h-full p-4 overflow-y-auto">
+              <PlannerBoard />
+            </div>
+          </section>
+
+          {/* Right: Live Preview */}
+          <aside className="hidden lg:block lg:col-span-4 xl:col-span-3 h-full bg-background">
+            <TweetPreview />
+          </aside>
         </div>
-      )}
+      </div>
     </main>
+  );
+}
+
+function Feature({ icon: Icon, title, desc }: { icon: any, title: string, desc: string }) {
+  return (
+    <div className="p-4 rounded-xl border bg-card text-card-foreground shadow-sm">
+      <div className="h-10 w-10 rounded-lg bg-primary/10 flex items-center justify-center mb-3 text-primary">
+        <Icon className="h-5 w-5" />
+      </div>
+      <h3 className="font-semibold mb-1">{title}</h3>
+      <p className="text-sm text-muted-foreground">{desc}</p>
+    </div>
   );
 }

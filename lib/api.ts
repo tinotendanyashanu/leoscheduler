@@ -1,4 +1,4 @@
-const BASE = process.env.NEXT_PUBLIC_WORKER_URL!;
+const BASE = process.env.NEXT_PUBLIC_WORKER_URL || "http://localhost:8787";
 const SESSION_KEY = "leoscheduler:session";
 
 export type Session = { token: string; user: { id: string; username: string; displayName: string } };
@@ -70,7 +70,7 @@ export type ApiPost = {
   content: string;
   mediaUrls: string[];
   scheduledFor: string | null;
-  status: "draft" | "ready" | "scheduled" | "sent" | "error";
+  status: "draft" | "ready" | "scheduled" | "sent" | "error" | "sending";
   userId: string;
   threadOrder: number;
   parentId: string | null;
@@ -86,7 +86,7 @@ export async function listPosts(): Promise<ApiPost[]> {
 export async function createPost(body: { 
   content: string; 
   scheduledFor?: string | null; 
-  status?: "draft" | "ready" | "scheduled";
+  status?: "draft" | "ready" | "scheduled" | "sending";
   threadOrder?: number;
   parentId?: string | null;
 }) {

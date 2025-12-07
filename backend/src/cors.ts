@@ -5,11 +5,16 @@ export function cors() {
     await next()
     
     const origin = c.req.header('Origin')
+    const appOrigin = (c.env as any)?.APP_ORIGIN as string | undefined
     const allowedOrigins = [
       'http://localhost:3000',
+      'http://127.0.0.1:3000',
+      'http://0.0.0.0:3000',
+      'http://localhost:3001',
+      'http://127.0.0.1:3001',
+      appOrigin,
       'https://leoscheduler.vercel.app',
-      // Add your production domain here
-    ]
+    ].filter(Boolean) as string[]
     
     if (origin && allowedOrigins.includes(origin)) {
       c.res.headers.set('Access-Control-Allow-Origin', origin)

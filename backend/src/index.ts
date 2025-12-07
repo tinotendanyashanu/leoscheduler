@@ -5,12 +5,13 @@ import { xApi } from './x-api'
 import { Post, User } from './schema'
 
 export interface Env {
-  POSTS_KV: KVNamespace
-  USERS_KV: KVNamespace
-  JWT_SECRET: string
+  KV_POSTS: KVNamespace
+  KV_TOKENS: KVNamespace
+  JWT_SIGNING_KEY: string
   X_CLIENT_ID: string
   X_CLIENT_SECRET: string
-  BASE_URL: string
+  X_REDIRECT_URI: string
+  APP_ORIGIN: string
 }
 
 const app = new Hono()
@@ -29,10 +30,10 @@ app.get('/health', (c) => {
 // OAuth routes
 app.get('/auth/connect', async (c) => {
   const env = c.env as unknown as Env
-  const { authUrl, state, codeVerifier } = await oauth.createAuthUrl(env.X_CLIENT_ID, env.BASE_URL)
+  const { authUrl, state, codeVerifier } = await oauth.createAuthUrl(env.X_CLIENT_ID, env.X_REDIRECT_URI)
   
   // Store code verifier temporarily (5 minutes)
-  await env.USERS_KV.put(`state:${state}`, codeVerifier, { expirationTtl: 300 })
+  await env.KV_TOKENS.put(`state:${state}`, codeVerifier, { expirationTtl: 300 })
   
   return c.json({ authUrl })
 })
@@ -47,11 +48,11 @@ app.get('/auth/callback', async (c) => {
   }
   
   // Retrieve and delete code verifier
-  const codeVerifier = await env.USERS_KV.get(`state:${state}`)
+  const codeVerifier = await env.KV_TOKENS.get(`state:${state}`)
   if (!codeVerifier) {
     return c.json({ error: 'Invalid or expired state' }, 400)
   }
-  await env.USERS_KV.delete(`state:${state}`)
+  await env.KV_TOKENS.delete(`state:${state}`)
   
   try {
     const tokens = await oauth.exchangeCodeForTokens(
@@ -59,17 +60,23 @@ app.get('/auth/callback', async (c) => {
       codeVerifier,
       env.X_CLIENT_ID,
       env.X_CLIENT_SECRET,
-      env.BASE_URL
+      env.X_REDIRECT_URI
     ) as any
+    console.log("Tokens received:", JSON.stringify(tokens));
     
-    // Get user info
-    const userInfo = await xApi.getUserInfo(tokens.access_token)
+    // Try to get user info, but fallback if it fails (Free Tier limitation)
+    let userInfo = { id: `user_${Date.now()}`, username: "Twitter User", name: "Twitter User", profile_image_url: "" };
+    try {
+      userInfo = await xApi.getUserInfo(tokens.access_token);
+    } catch (e) {
+      console.warn("Could not fetch user info (likely Free Tier limitation), using placeholder", e);
+    }
     
     const user: User = {
       id: userInfo.id,
       username: userInfo.username,
       displayName: userInfo.name,
-      profileImage: userInfo.profile_image_url,
+      profileImage: userInfo.profile_image_url || "",
       accessToken: tokens.access_token,
       refreshToken: tokens.refresh_token || null,
       tokenExpiry: new Date(Date.now() + (tokens.expires_in * 1000)).toISOString(),
@@ -77,14 +84,15 @@ app.get('/auth/callback', async (c) => {
       updatedAt: new Date().toISOString()
     }
     
+    
     // Store user
-    await env.USERS_KV.put(`user:${user.id}`, JSON.stringify(user))
+    await env.KV_TOKENS.put(`user:${user.id}`, JSON.stringify(user))
     
     // Create JWT session
-    const jwt = await oauth.createJWT(user.id, env.JWT_SECRET)
+    const jwt = await oauth.createJWT(user.id, env.JWT_SIGNING_KEY)
     
     // Redirect to frontend with JWT
-    return c.redirect(`${env.BASE_URL}?token=${jwt}`)
+    return c.redirect(`${env.APP_ORIGIN}?token=${jwt}`)
   } catch (error) {
     console.error('OAuth callback error:', error)
     return c.json({ error: 'Authentication failed' }, 500)
@@ -99,12 +107,12 @@ app.get('/api/user', async (c) => {
   }
   
   const token = authHeader.slice(7)
-  const payload = await oauth.verifyJWT(token, c.env.JWT_SECRET)
+  const payload = await oauth.verifyJWT(token, c.env!.JWT_SIGNING_KEY as string)
   if (!payload) {
     return c.json({ error: 'Invalid token' }, 401)
   }
   
-  const user = await c.env.USERS_KV.get(`user:${payload.sub}`)
+  const user = await c.env!.KV_TOKENS.get(`user:${payload.sub}`)
   if (!user) {
     return c.json({ error: 'User not found' }, 404)
   }
@@ -124,13 +132,13 @@ app.get('/api/posts', async (c) => {
   }
   
   const token = authHeader.slice(7)
-  const payload = await oauth.verifyJWT(token, c.env.JWT_SECRET)
+  const payload = await oauth.verifyJWT(token, c.env.JWT_SIGNING_KEY)
   if (!payload) {
     return c.json({ error: 'Invalid token' }, 401)
   }
   
   const userId = payload.sub
-  const postsData = await c.env.POSTS_KV.get(`posts:${userId}`)
+  const postsData = await c.env.KV_POSTS.get(`posts:${userId}`)
   const posts = postsData ? JSON.parse(postsData) : []
   
   return c.json(posts)
@@ -139,12 +147,13 @@ app.get('/api/posts', async (c) => {
 // Create post
 app.post('/api/posts', async (c) => {
   const authHeader = c.req.header('Authorization')
+  console.log("POST /api/posts Auth Header:", authHeader ? "Present" : "Missing");
   if (!authHeader?.startsWith('Bearer ')) {
     return c.json({ error: 'Unauthorized' }, 401)
   }
   
   const token = authHeader.slice(7)
-  const payload = await oauth.verifyJWT(token, c.env.JWT_SECRET)
+  const payload = await oauth.verifyJWT(token, c.env.JWT_SIGNING_KEY)
   if (!payload) {
     return c.json({ error: 'Invalid token' }, 401)
   }
@@ -166,15 +175,41 @@ app.post('/api/posts', async (c) => {
     updatedAt: new Date().toISOString()
   }
   
+  // Handle immediate posting
+  if (post.status === 'sending') {
+    try {
+      // Get user tokens to access Twitter API
+      const userStr = await c.env.KV_TOKENS.get(`user:${userId}`)
+      if (userStr) {
+        const user = JSON.parse(userStr) as User
+        
+        // Post to Twitter
+        const tweetResponse = await xApi.postTweet(user.accessToken, {
+          text: post.content,
+          media: post.mediaUrls.length > 0 ? { media_ids: post.mediaUrls } : undefined,
+          // TODO: Handle reply to parent if thread
+        })
+        
+        post.status = 'sent'
+        post.postedTweetId = tweetResponse.data.id
+        post.updatedAt = new Date().toISOString()
+        console.log(`Immediately posted tweet for user ${userId}: ${tweetResponse.data.id}`)
+      }
+    } catch (error) {
+      console.error(`Failed to immediately post tweet for user ${userId}:`, error)
+      post.status = 'draft' // Revert to draft on failure
+    }
+  }
+  
   // Get existing posts
-  const postsData = await c.env.POSTS_KV.get(`posts:${userId}`)
+  const postsData = await c.env.KV_POSTS.get(`posts:${userId}`)
   const posts = postsData ? JSON.parse(postsData) : []
   
   // Add new post
   posts.push(post)
   
   // Save back to KV
-  await c.env.POSTS_KV.put(`posts:${userId}`, JSON.stringify(posts))
+  await c.env.KV_POSTS.put(`posts:${userId}`, JSON.stringify(posts))
   
   return c.json(post)
 })
@@ -187,7 +222,7 @@ app.put('/api/posts/:id', async (c) => {
   }
   
   const token = authHeader.slice(7)
-  const payload = await oauth.verifyJWT(token, c.env.JWT_SECRET)
+  const payload = await oauth.verifyJWT(token, c.env.JWT_SIGNING_KEY)
   if (!payload) {
     return c.json({ error: 'Invalid token' }, 401)
   }
@@ -197,7 +232,7 @@ app.put('/api/posts/:id', async (c) => {
   const body = await c.req.json()
   
   // Get existing posts
-  const postsData = await c.env.POSTS_KV.get(`posts:${userId}`)
+  const postsData = await c.env.KV_POSTS.get(`posts:${userId}`)
   const posts = postsData ? JSON.parse(postsData) : []
   
   // Find and update post
@@ -213,7 +248,7 @@ app.put('/api/posts/:id', async (c) => {
   }
   
   // Save back to KV
-  await c.env.POSTS_KV.put(`posts:${userId}`, JSON.stringify(posts))
+  await c.env.KV_POSTS.put(`posts:${userId}`, JSON.stringify(posts))
   
   return c.json(posts[postIndex])
 })
@@ -226,7 +261,7 @@ app.delete('/api/posts/:id', async (c) => {
   }
   
   const token = authHeader.slice(7)
-  const payload = await oauth.verifyJWT(token, c.env.JWT_SECRET)
+  const payload = await oauth.verifyJWT(token, c.env.JWT_SIGNING_KEY)
   if (!payload) {
     return c.json({ error: 'Invalid token' }, 401)
   }
@@ -235,7 +270,7 @@ app.delete('/api/posts/:id', async (c) => {
   const postId = c.req.param('id')
   
   // Get existing posts
-  const postsData = await c.env.POSTS_KV.get(`posts:${userId}`)
+  const postsData = await c.env.KV_POSTS.get(`posts:${userId}`)
   const posts = postsData ? JSON.parse(postsData) : []
   
   // Filter out deleted post
@@ -246,7 +281,7 @@ app.delete('/api/posts/:id', async (c) => {
   }
   
   // Save back to KV
-  await c.env.POSTS_KV.put(`posts:${userId}`, JSON.stringify(filteredPosts))
+  await c.env.KV_POSTS.put(`posts:${userId}`, JSON.stringify(filteredPosts))
   
   return c.json({ success: true })
 })
@@ -261,13 +296,13 @@ export default {
     try {
       // Get all user IDs from KV (this is a simplified approach)
       // In production, you might want a more efficient way to track users
-      const { keys } = await env.USERS_KV.list({ prefix: 'user:' })
+      const { keys } = await env.KV_TOKENS.list({ prefix: 'user:' })
       
       for (const key of keys) {
         const userId = key.name.replace('user:', '')
         
         // Get user data
-        const userData = await env.USERS_KV.get(key.name)
+        const userData = await env.KV_TOKENS.get(key.name)
         if (!userData) continue
         
         const user = JSON.parse(userData) as User
@@ -290,7 +325,7 @@ export default {
               tokenExpiry: new Date(Date.now() + (tokens.expires_in * 1000)).toISOString(),
               updatedAt: new Date().toISOString()
             }
-            await env.USERS_KV.put(key.name, JSON.stringify(updatedUser))
+            await env.KV_TOKENS.put(key.name, JSON.stringify(updatedUser))
           } catch (error) {
             console.error(`Failed to refresh token for user ${userId}:`, error)
             continue
@@ -298,7 +333,7 @@ export default {
         }
         
         // Get user's posts
-        const postsData = await env.POSTS_KV.get(`posts:${userId}`)
+        const postsData = await env.KV_POSTS.get(`posts:${userId}`)
         if (!postsData) continue
         
         const posts = JSON.parse(postsData) as Post[]
@@ -363,7 +398,7 @@ export default {
         }
         
         // Save updated posts
-        await env.POSTS_KV.put(`posts:${userId}`, JSON.stringify(posts))
+        await env.KV_POSTS.put(`posts:${userId}`, JSON.stringify(posts))
       }
       
       console.log('Scheduled tweet job completed')
