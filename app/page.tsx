@@ -10,12 +10,16 @@ import { UserMenu } from "@/components/auth/user-menu";
 import { getSession, setSession, getCurrentUser, type Session } from "@/lib/api";
 import { usePosts } from "@/hooks/use-posts";
 import Link from "next/link";
-import { Calendar, Layout, PenTool, ShieldCheck } from "lucide-react";
+import { Calendar as CalendarIcon, Layout, PenTool, ShieldCheck } from "lucide-react";
+import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
+import { CalendarView } from "@/components/planner/calendar-view";
+import { QuickComposer } from "@/components/composer/quick-composer";
 
 export default function Page() {
   const [currentSession, setCurrentSession] = useState<Session | null>(null);
   const [userLoaded, setUserLoaded] = useState(false);
-  const loadFromApi = usePosts(s => s.loadFromApi);
+  const startPolling = usePosts(s => s.startPolling);
+  const stopPolling = usePosts(s => s.stopPolling);
 
   useEffect(() => {
     // Capture token on root redirect (worker may send token here)
@@ -55,12 +59,14 @@ export default function Page() {
         setUserLoaded(true);
       }
 
-      // Load posts from API
-      loadFromApi().catch(console.error);
+      // Start polling for posts
+      startPolling();
     } else {
       setUserLoaded(true);
     }
-  }, [loadFromApi]);
+
+    return () => stopPolling();
+  }, [startPolling, stopPolling]);
 
   const [authInvalid, setAuthInvalid] = useState(false);
   useEffect(() => {
@@ -96,7 +102,7 @@ export default function Page() {
 
           <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6 pt-12 text-left">
             <Feature icon={Layout} title="Kanban Board" desc="Visualize your content pipeline with an intuitive drag-and-drop board." />
-            <Feature icon={Calendar} title="Smart Scheduling" desc="Queue up threads and tweets to go out at the perfect time." />
+            <Feature icon={CalendarIcon} title="Smart Scheduling" desc="Queue up threads and tweets to go out at the perfect time." />
             <Feature icon={PenTool} title="Thread Composer" desc="Write long-form threads with a powerful, distraction-free editor." />
             <Feature icon={ShieldCheck} title="Secure & Private" desc="Your tokens are stored securely in Cloudflare KV. You own your data." />
           </div>
@@ -136,9 +142,33 @@ export default function Page() {
 
         <div className="grid grid-cols-12 h-full">
           {/* Left: Board */}
-          <section className="col-span-12 lg:col-span-8 xl:col-span-9 h-full overflow-hidden border-r bg-muted/5">
-            <div className="h-full p-4 overflow-y-auto">
-              <PlannerBoard />
+          <section className="col-span-12 lg:col-span-8 xl:col-span-9 h-full overflow-hidden border-r bg-muted/5 flex flex-col">
+            <div className="flex-1 overflow-hidden flex flex-col p-4">
+              <QuickComposer />
+              
+              <Tabs defaultValue="board" className="flex-1 flex flex-col overflow-hidden">
+                <div className="flex items-center justify-between mb-4">
+                  <h2 className="text-lg font-semibold tracking-tight">Content Pipeline</h2>
+                  <TabsList>
+                    <TabsTrigger value="board" className="gap-2">
+                      <Layout className="h-4 w-4" /> Board
+                    </TabsTrigger>
+                    <TabsTrigger value="calendar" className="gap-2">
+                      <CalendarIcon className="h-4 w-4" /> Calendar
+                    </TabsTrigger>
+                  </TabsList>
+                </div>
+
+                <TabsContent value="board" className="flex-1 overflow-hidden mt-0">
+                  <div className="h-full overflow-y-auto pr-2">
+                    <PlannerBoard />
+                  </div>
+                </TabsContent>
+                
+                <TabsContent value="calendar" className="flex-1 overflow-hidden mt-0">
+                  <CalendarView />
+                </TabsContent>
+              </Tabs>
             </div>
           </section>
 

@@ -1,10 +1,11 @@
-export type PostStatus = "draft" | "ready" | "scheduled" | "sent" | "error";
+export type PostStatus = "draft" | "ready" | "scheduled" | "sent" | "error" | "sending";
 
 export interface Post {
   id: string;
   content: string; // renamed from text to match API
   status: PostStatus;
   scheduledFor?: string | null; // renamed from runAtUTC
+  timezone?: string; // e.g. "Europe/Berlin"
   mediaUrls?: string[]; // renamed from mediaCount
   threadOrder?: number; // renamed from threadSteps
   parentId?: string | null; // for threading

@@ -5,7 +5,7 @@ import { addDays, format } from "date-fns";
 import { Calendar as CalendarIcon, Clock, Image as ImageIcon, Plus, X, Send, Save } from "lucide-react";
 import { usePosts } from "@/hooks/use-posts";
 import { useSettings } from "@/hooks/use-settings";
-import { MAX_TWEET, combineDateTimeToUTCISO, cn } from "@/lib/utils";
+import { MAX_TWEET, combineDateTimeToLocalISO, cn } from "@/lib/utils";
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogTrigger } from "@/components/ui/dialog";
 import { Button } from "@/components/ui/button";
 import { Textarea } from "@/components/ui/textarea";
@@ -52,7 +52,7 @@ export function ComposeDialog() {
 
     const content = body[0];
     // If scheduling, use date. If "Post Now" (kind=schedule but no date), use null.
-    const scheduledFor = (kind === "schedule" && date) ? combineDateTimeToUTCISO(date, time) : null;
+    const scheduledFor = (kind === "schedule" && date) ? combineDateTimeToLocalISO(date, time) : null;
     
     // Determine status: 
     // - draft -> 'draft'
@@ -67,6 +67,7 @@ export function ComposeDialog() {
       content,
       status: status as any,
       scheduledFor,
+      timezone,
       threadOrder: isThread ? body.length : 0,
     });
 

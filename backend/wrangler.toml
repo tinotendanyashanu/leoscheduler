@@ -20,7 +20,7 @@ APP_ORIGIN = "http://localhost:3000"
 
 # Cron triggers - runs at 07:00 and 16:00 UTC (≈ 09:00 & 18:00 Warsaw depending on DST)
 [triggers]
-crons = ["0 7,16 * * *"]
+crons = ["* * * * *"]
 
 [placement]
 mode = "smart"

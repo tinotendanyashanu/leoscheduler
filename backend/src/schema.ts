@@ -1,10 +1,12 @@
-export type PostStatus = "draft" | "ready" | "scheduled" | "sent" | "error";
+export type PostStatus = "draft" | "ready" | "scheduled" | "sent" | "error" | "sending";
 
 export interface Post {
   id: string
   content: string
   mediaUrls: string[]
   scheduledFor: string | null
+  scheduledFor: string | null
+  timezone?: string
   status: PostStatus
   userId: string
   threadOrder: number

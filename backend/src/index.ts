@@ -166,6 +166,7 @@ app.post('/api/posts', async (c) => {
     content: body.content,
     mediaUrls: body.mediaUrls || [],
     scheduledFor: body.scheduledFor,
+    timezone: body.timezone,
     status: body.status || 'draft',
     userId,
     threadOrder: body.threadOrder || 0,
@@ -286,124 +287,188 @@ app.delete('/api/posts/:id', async (c) => {
   return c.json({ success: true })
 })
 
+// Manual trigger for cron (for local dev)
+app.get('/api/cron', async (c) => {
+  const env = c.env as unknown as Env
+  const logs = await processScheduledPosts(env)
+  return c.json({ success: true, logs })
+})
+
+async function processScheduledPosts(env: Env) {
+  const logs: string[] = []
+  const log = (msg: string) => {
+    console.log(msg)
+    logs.push(msg)
+  }
+  
+  log('Running scheduled tweet job...')
+    
+  try {
+    // Get all user IDs from KV (this is a simplified approach)
+    // In production, you might want a more efficient way to track users
+    const { keys } = await env.KV_TOKENS.list({ prefix: 'user:' })
+    
+    for (const key of keys) {
+      const userId = key.name.replace('user:', '')
+      log(`Processing user ${userId}...`)
+      log(`Server Time: ${new Date().toISOString()}`)
+      
+      // Get user data
+      const userData = await env.KV_TOKENS.get(key.name)
+      if (!userData) continue
+      
+      const user = JSON.parse(userData) as User
+      
+      // Check if token needs refresh
+      const tokenExpiry = new Date(user.tokenExpiry)
+      const needsRefresh = tokenExpiry.getTime() - Date.now() < 300000 // 5 minutes
+      
+      let accessToken = user.accessToken
+      if (needsRefresh && user.refreshToken) {
+        try {
+          const tokens = await xApi.refreshAccessToken(user.refreshToken, env.X_CLIENT_ID, env.X_CLIENT_SECRET)
+          accessToken = tokens.access_token
+          
+          // Update user with new tokens
+          const updatedUser = {
+            ...user,
+            accessToken: tokens.access_token,
+            refreshToken: tokens.refresh_token || user.refreshToken,
+            tokenExpiry: new Date(Date.now() + (tokens.expires_in * 1000)).toISOString(),
+            updatedAt: new Date().toISOString()
+          }
+          await env.KV_TOKENS.put(key.name, JSON.stringify(updatedUser))
+        } catch (error) {
+          console.error(`Failed to refresh token for user ${userId}:`, error)
+          continue
+        }
+      }
+      
+      
+      // Get user's posts
+      const postsData = await env.KV_POSTS.get(`posts:${userId}`)
+      if (!postsData) continue
+      
+      const posts = JSON.parse(postsData) as Post[]
+      
+      // Find posts scheduled for now using timezone-aware comparison
+      const now = new Date()
+
+      const postsToSend = posts.filter(post => {
+        if (post.status !== 'scheduled') {
+           // log(`Post ${post.id}: Status is ${post.status}, identifying as not scheduled`)
+           return false;
+        }
+        if (!post.scheduledFor) {
+           log(`Post ${post.id}: Scheduled status but no date?`)
+           return false;
+        }
+        
+        // Current Server Time (UTC)
+        // We need to compare "Post Wall Time" vs "User Wall Time"
+        // Post Wall Time is stored in post.scheduledFor (e.g., "2025-12-07T09:00:00")
+        // User Wall Time is current server time converted to user's timezone
+        
+        let userWallTime: Date
+        try {
+           // Create a date string representing the user's current time
+           // "sv" locale gives YYYY-MM-DD HH:mm:ss format which is easy to parse
+           const userTimeString = now.toLocaleString("sv", { timeZone: post.timezone || 'UTC' })
+           userWallTime = new Date(userTimeString.replace(' ', 'T'))
+        } catch (e) {
+           log(`Post ${post.id}: Invalid timezone ${post.timezone}, defaulting to UTC`)
+           userWallTime = now
+        }
+
+        // Parse the scheduled time as if it were a local date object
+        // Since our utils.ts now sends "YYYY-MM-DDTHH:mm:ss.sss" without Z, `new Date()` might treat it as UTC or Local
+        // To be safe, we want to treat it essentially as a number comparison of (YYYY, MM, DD, HH, mm)
+        // Simplest way: Treat both as UTC for comparison purposes to avoid JS runtime timezone shift
+        
+        const scheduledDate = new Date(post.scheduledFor.endsWith('Z') ? post.scheduledFor.slice(0, -1) : post.scheduledFor)
+        
+        // Safety check: if userWallTime is vastly in the future (24h+), ignore it? 
+        // Actually we just want: Is userWallTime >= scheduledDate? AND is userWallTime < scheduledDate + 24h?
+        
+        const isTime = userWallTime >= scheduledDate && userWallTime.getTime() - scheduledDate.getTime() < 24 * 60 * 60 * 1000;
+        
+        log(`Post ${post.id}: Scheduled ${post.scheduledFor} (Wall), User Now ${userWallTime.toISOString()} (Wall in ${post.timezone}). Ready? ${isTime}`)
+        
+        if (!isTime) {
+          log(`Skipping post ${post.id}: Diff ${(userWallTime.getTime() - scheduledDate.getTime())/1000}s`)
+        }
+        return isTime;
+      })
+      
+      log(`User ${userId}: Found ${posts.length} posts, ${postsToSend.length} ready to send.`)
+      
+      if (postsToSend.length === 0) continue
+      
+      // Sort by thread order for proper threading
+      postsToSend.sort((a, b) => a.threadOrder - b.threadOrder)
+      
+      // Post tweets
+      for (const post of postsToSend) {
+        try {
+          let inReplyToTweetId: string | undefined
+          
+          // If this is a thread reply, find the parent tweet ID
+          if (post.parentId) {
+            const parentPost = posts.find(p => p.id === post.parentId)
+            inReplyToTweetId = parentPost?.postedTweetId || undefined
+          }
+          
+          const tweetResponse = await xApi.postTweet(accessToken, {
+            text: post.content,
+            media: post.mediaUrls.length > 0 ? { media_ids: post.mediaUrls } : undefined,
+            reply: inReplyToTweetId ? { in_reply_to_tweet_id: inReplyToTweetId } : undefined
+          })
+          
+          // Update post status
+          const updatedPost = {
+            ...post,
+            status: 'sent' as const,
+            postedTweetId: tweetResponse.data.id,
+            updatedAt: new Date().toISOString()
+          }
+          
+          // Update posts array
+          const postIndex = posts.findIndex(p => p.id === post.id)
+          posts[postIndex] = updatedPost
+          
+          log(`Posted tweet for user ${userId}: ${tweetResponse.data.id}`)
+        } catch (error) {
+          console.error(`Failed to post tweet for user ${userId}:`, error)
+          log(`Failed to post tweet: ${error}`)
+          
+          // Mark post as failed
+          const postIndex = posts.findIndex(p => p.id === post.id)
+          posts[postIndex] = {
+            ...posts[postIndex],
+            status: 'draft' as const, // Reset to draft so user can reschedule
+            updatedAt: new Date().toISOString()
+          }
+        }
+      }
+      
+      // Save updated posts
+      await env.KV_POSTS.put(`posts:${userId}`, JSON.stringify(posts))
+    }
+    
+    log('Scheduled tweet job completed')
+  } catch (error) {
+    console.error('Scheduled tweet job failed:', error)
+    log(`Job failed: ${error}`)
+  }
+  
+  return logs
+}
+
 // Cron job to post scheduled tweets
 export default {
   fetch: app.fetch,
   
   async scheduled(event: ScheduledEvent, env: Env) {
-    console.log('Running scheduled tweet job...')
-    
-    try {
-      // Get all user IDs from KV (this is a simplified approach)
-      // In production, you might want a more efficient way to track users
-      const { keys } = await env.KV_TOKENS.list({ prefix: 'user:' })
-      
-      for (const key of keys) {
-        const userId = key.name.replace('user:', '')
-        
-        // Get user data
-        const userData = await env.KV_TOKENS.get(key.name)
-        if (!userData) continue
-        
-        const user = JSON.parse(userData) as User
-        
-        // Check if token needs refresh
-        const tokenExpiry = new Date(user.tokenExpiry)
-        const needsRefresh = tokenExpiry.getTime() - Date.now() < 300000 // 5 minutes
-        
-        let accessToken = user.accessToken
-        if (needsRefresh && user.refreshToken) {
-          try {
-            const tokens = await xApi.refreshAccessToken(user.refreshToken, env.X_CLIENT_ID, env.X_CLIENT_SECRET)
-            accessToken = tokens.access_token
-            
-            // Update user with new tokens
-            const updatedUser = {
-              ...user,
-              accessToken: tokens.access_token,
-              refreshToken: tokens.refresh_token || user.refreshToken,
-              tokenExpiry: new Date(Date.now() + (tokens.expires_in * 1000)).toISOString(),
-              updatedAt: new Date().toISOString()
-            }
-            await env.KV_TOKENS.put(key.name, JSON.stringify(updatedUser))
-          } catch (error) {
-            console.error(`Failed to refresh token for user ${userId}:`, error)
-            continue
-          }
-        }
-        
-        // Get user's posts
-        const postsData = await env.KV_POSTS.get(`posts:${userId}`)
-        if (!postsData) continue
-        
-        const posts = JSON.parse(postsData) as Post[]
-        
-        // Find posts scheduled for now (within the last minute to account for cron timing)
-        const now = new Date()
-        const oneMinuteAgo = new Date(now.getTime() - 60000)
-        
-        const postsToSend = posts.filter(post => 
-          post.status === 'scheduled' &&
-          post.scheduledFor &&
-          new Date(post.scheduledFor) <= now &&
-          new Date(post.scheduledFor) > oneMinuteAgo
-        )
-        
-        if (postsToSend.length === 0) continue
-        
-        // Sort by thread order for proper threading
-        postsToSend.sort((a, b) => a.threadOrder - b.threadOrder)
-        
-        // Post tweets
-        for (const post of postsToSend) {
-          try {
-            let inReplyToTweetId: string | undefined
-            
-            // If this is a thread reply, find the parent tweet ID
-            if (post.parentId) {
-              const parentPost = posts.find(p => p.id === post.parentId)
-              inReplyToTweetId = parentPost?.postedTweetId || undefined
-            }
-            
-            const tweetResponse = await xApi.postTweet(accessToken, {
-              text: post.content,
-              media: post.mediaUrls.length > 0 ? { media_ids: post.mediaUrls } : undefined,
-              reply: inReplyToTweetId ? { in_reply_to_tweet_id: inReplyToTweetId } : undefined
-            })
-            
-            // Update post status
-            const updatedPost = {
-              ...post,
-              status: 'sent' as const,
-              postedTweetId: tweetResponse.data.id,
-              updatedAt: new Date().toISOString()
-            }
-            
-            // Update posts array
-            const postIndex = posts.findIndex(p => p.id === post.id)
-            posts[postIndex] = updatedPost
-            
-            console.log(`Posted tweet for user ${userId}: ${tweetResponse.data.id}`)
-          } catch (error) {
-            console.error(`Failed to post tweet for user ${userId}:`, error)
-            
-            // Mark post as failed
-            const postIndex = posts.findIndex(p => p.id === post.id)
-            posts[postIndex] = {
-              ...posts[postIndex],
-              status: 'draft' as const, // Reset to draft so user can reschedule
-              updatedAt: new Date().toISOString()
-            }
-          }
-        }
-        
-        // Save updated posts
-        await env.KV_POSTS.put(`posts:${userId}`, JSON.stringify(posts))
-      }
-      
-      console.log('Scheduled tweet job completed')
-    } catch (error) {
-      console.error('Scheduled tweet job failed:', error)
-    }
+    await processScheduledPosts(env)
   }
 }

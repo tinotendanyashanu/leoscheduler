@@ -47,7 +47,7 @@ export const oauth = {
       response_type: "code",
       client_id: clientId,
       redirect_uri: redirectUri,
-      scope: "tweet.write offline.access",
+      scope: "tweet.write tweet.read users.read offline.access",
       state: state,
       code_challenge: codeChallenge,
       code_challenge_method: "S256",

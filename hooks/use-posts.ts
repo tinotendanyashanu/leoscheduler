@@ -33,44 +33,8 @@ function postToApi(post: Partial<Post>): Partial<api.ApiPost> {
     mediaUrls: post.mediaUrls || [],
     threadOrder: post.threadOrder || post.threadSteps || 0,
     parentId: post.parentId || null,
+    parentId: post.parentId || null,
   };
-}
-
-function seed(): Post[] {
-  return [
-    { 
-      id: nanoid(), 
-      content: "Draft idea about launch teases…", 
-      text: "Draft idea about launch teases…",
-      status: "draft", 
-      threadSteps: 0,
-      threadOrder: 0 
-    },
-    { 
-      id: nanoid(), 
-      content: "Thread: Step 1/5 about roadmap…", 
-      text: "Thread: Step 1/5 about roadmap…",
-      status: "ready", 
-      threadSteps: 5,
-      threadOrder: 1 
-    },
-    { 
-      id: nanoid(), 
-      content: "Posting tomorrow 09:00", 
-      text: "Posting tomorrow 09:00",
-      status: "scheduled", 
-      scheduledFor: new Date().toISOString(),
-      runAtUTC: new Date().toISOString(),
-      threadOrder: 0
-    },
-    { 
-      id: nanoid(), 
-      content: "Just shipped Kanban preview ✅", 
-      text: "Just shipped Kanban preview ✅",
-      status: "sent",
-      threadOrder: 0
-    },
-  ];
 }
 
 type Store = {
@@ -82,20 +46,54 @@ type Store = {
   moveTo: (id: string, to: PostStatus) => void;
   reorder: (idsInOrder: string[], column: PostStatus) => void;
   upsert: (p: Post) => void;
+
+
   addPost: (p: Omit<Post, "id" | "createdAt" | "updatedAt">) => string;
 
   // API methods
   loadFromApi: () => Promise<void>;
-  addPostViaApi: (p: { content: string; scheduledFor?: string | null; status?: PostStatus; threadOrder?: number; parentId?: string | null }) => Promise<string>;
+  addPostViaApi: (p: { content: string; scheduledFor?: string | null; timezone?: string; status?: PostStatus; threadOrder?: number; parentId?: string | null }) => Promise<string>;
   updatePostViaApi: (id: string, patch: Partial<Post>) => Promise<void>;
   deletePostViaApi: (id: string) => Promise<void>;
+  
+  // Polling
+  pollingId: NodeJS.Timeout | null;
+  startPolling: (intervalMs?: number) => void;
+  stopPolling: () => void;
 };
 
 export const usePosts = create<Store>((set, get) => ({
   posts: [],
   selectedId: null,
   isLoading: false,
+  pollingId: null,
   setSelected: (id) => set({ selectedId: id }),
+  startPolling: (intervalMs = 30000) => {
+    const { pollingId, loadFromApi } = get();
+    if (pollingId) return; // Already polling
+
+    // Initial load
+    loadFromApi();
+
+    const id = setInterval(() => {
+      // Don't poll if we're currently loading to avoid race conditions/flicker
+      if (!get().isLoading) {
+        get().loadFromApi();
+        // Also trigger cron for local dev automation
+        api.triggerCron().catch(err => console.error("Cron trigger failed:", err));
+      }
+    }, intervalMs);
+
+    set({ pollingId: id });
+  },
+
+  stopPolling: () => {
+    const { pollingId } = get();
+    if (pollingId) {
+      clearInterval(pollingId);
+      set({ pollingId: null });
+    }
+  },
 
   moveTo: (id, to) => {
     // Update locally first for responsive UI

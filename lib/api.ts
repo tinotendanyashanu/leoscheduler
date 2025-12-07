@@ -97,6 +97,11 @@ export async function updatePost(id: string, patch: Partial<ApiPost>) {
   return api<ApiPost>(`/api/posts/${id}`, { method: "PUT", body: JSON.stringify(patch) });
 }
 
+
 export async function deletePost(id: string) {
   return api<{ success: true }>(`/api/posts/${id}`, { method: "DELETE" });
+}
+
+export async function triggerCron() {
+  return api<{ success: true; logs: string[] }>("/api/cron");
 }
